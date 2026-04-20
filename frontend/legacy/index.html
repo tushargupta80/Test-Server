@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quiz Platform</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <div class="brand">
+        <h1>Quiz Platform</h1>
+        <p>Student, Teacher & Admin panels in one app</p>
+      </div>
+      <nav class="panel-nav">
+        <button id="studentPanelBtn" class="active">Student</button>
+        <button id="teacherPanelBtn">Teacher</button>
+        <button id="adminPanelBtn">Admin</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="studentPanel" class="panel active">
+        <div class="panel-header">
+          <div>
+            <h2>Student Dashboard</h2>
+            <p>Choose a quiz card to start attempting.</p>
+          </div>
+        </div>
+
+        <div id="quizList" class="card-grid"></div>
+
+        <div id="quizAttempt" class="attempt-panel hidden">
+          <div class="attempt-header">
+            <h3 id="attemptQuizTitle"></h3>
+            <button id="closeAttempt">Close</button>
+          </div>
+          <div id="questionContainer"></div>
+          <div class="attempt-footer">
+            <button id="prevQuestion">Previous</button>
+            <button id="nextQuestion">Next</button>
+            <button id="submitQuiz" class="primary">Submit Quiz</button>
+          </div>
+          <div id="resultBox" class="result-box hidden"></div>
+        </div>
+      </section>
+
+      <section id="teacherPanel" class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Teacher Dashboard</h2>
+            <p>Add new quizzes and questions for your students.</p>
+          </div>
+        </div>
+
+        <form id="teacherForm" class="teacher-form">
+          <div class="form-row">
+            <label for="quizTitle">Quiz title</label>
+            <input id="quizTitle" type="text" placeholder="e.g. JavaScript Basics" required />
+          </div>
+          <div class="form-row">
+            <label for="quizDescription">Quiz description</label>
+            <textarea id="quizDescription" rows="3" placeholder="Write a short description"></textarea>
+          </div>
+
+          <div id="questionsContainer" class="questions-container"></div>
+
+          <div class="teacher-actions">
+            <button id="addQuestionBtn" type="button">Add Question</button>
+            <button id="saveQuizBtn" type="submit" class="primary">Save Quiz</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="adminPanel" class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Admin Dashboard</h2>
+            <p>Review quizzes and reset the platform data.</p>
+          </div>
+        </div>
+
+        <div class="admin-cards">
+          <div class="admin-card">
+            <h3 id="totalQuizzes">0</h3>
+            <p>Total quizzes</p>
+          </div>
+          <div class="admin-card">
+            <h3 id="totalQuestions">0</h3>
+            <p>Total questions</p>
+          </div>
+        </div>
+
+        <div class="admin-list">
+          <h3>Available Quizzes</h3>
+          <div id="adminQuizList"></div>
+        </div>
+
+        <button id="resetData" class="danger">Reset platform data</button>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

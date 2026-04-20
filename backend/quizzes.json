@@ -1,0 +1,36 @@
+[
+  {
+    "id": "quiz-js-01",
+    "title": "JavaScript Basics",
+    "description": "A short quiz covering variables, arrays, and loops.",
+    "questions": [
+      {
+        "text": "Which keyword declares a variable that cannot be reassigned?",
+        "options": ["let", "const", "var", "function"],
+        "correct": 1
+      },
+      {
+        "text": "What is the result of [1,2,3].length?",
+        "options": ["2", "3", "undefined", "0"],
+        "correct": 1
+      }
+    ]
+  },
+  {
+    "id": "quiz-html-01",
+    "title": "HTML Fundamentals",
+    "description": "Test your knowledge of HTML tags and structure.",
+    "questions": [
+      {
+        "text": "Which tag defines a paragraph?",
+        "options": ["<div>", "<p>", "<section>", "<span>"],
+        "correct": 1
+      },
+      {
+        "text": "What attribute is used to link a stylesheet?",
+        "options": ["src", "href", "rel", "type"],
+        "correct": 2
+      }
+    ]
+  }
+]

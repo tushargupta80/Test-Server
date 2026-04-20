@@ -1,0 +1,34 @@
+[
+  {
+    "id": "user-student-1",
+    "username": "student1",
+    "name": "Student Demo",
+    "role": "student",
+    "salt": "334e1fe34278b39bbd8f5b8601df3c33",
+    "passwordHash": "ae50d27c60a6a8672f3be7a15180864c8a93424177acf7f5dd61b67db6b53b2c66441e94c0e24fff203319feb3f41220837215630f6444901f063a803cef5989"
+  },
+  {
+    "id": "user-teacher-1",
+    "username": "teacher1",
+    "name": "Teacher Demo",
+    "role": "teacher",
+    "salt": "1936a2c56c1a0ab308a0a9a0bef8e182",
+    "passwordHash": "d241d915759edd3cab12de4dde7bf609ff486529142aaeedc4460da4ecfa53105e157fbfee0e77709d309e62c80c5e981a8ef60bccc89b855427c2ad3ef69f0a"
+  },
+  {
+    "id": "user-admin-1",
+    "username": "admin1",
+    "name": "Admin Demo",
+    "role": "admin",
+    "salt": "35e5cb2a40d1f43a125e5f6934294754",
+    "passwordHash": "298c66c7d60165d56a68d8f5ef17951ead2ec9746685f34a3a02cf75d2dbee831e4f40cce97de5a88c210d593b1838937ca5ddb5fc0469e0149fb1da2905c7e5"
+  },
+  {
+    "id": "user-1776667155641",
+    "username": "Tushar",
+    "name": "Tushar Gupta",
+    "role": "student",
+    "salt": "8e03ee881e1f3a47f504fa3b4ea22018",
+    "passwordHash": "27db466290ca973e3c94d43f715eb9bfb5835b29d8029572d2d2b7bf53792dc4f9390160dff5e8581379cee6c613e3504a058dbb9a65f3f43ac8d0f8874f155b"
+  }
+]
