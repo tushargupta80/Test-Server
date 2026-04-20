@@ -15,12 +15,6 @@ const panelLabels = {
   admin: 'Admin',
 };
 
-const starterAccounts = [
-  { role: 'student', username: 'student1', password: 'student123' },
-  { role: 'teacher', username: 'teacher1', password: 'teacher123' },
-  { role: 'admin', username: 'admin1', password: 'admin123' },
-];
-
 function Alert({ children, tone = 'neutral' }) {
   return <div className={`alert-box ${tone}`}>{children}</div>;
 }
@@ -476,19 +470,6 @@ function App() {
               Sign In
             </button>
           </form>
-
-          <div className="credentials-panel">
-            <h2>Starter Accounts</h2>
-            <div className="credentials-grid">
-              {starterAccounts.map((account) => (
-                <div key={account.role} className="credential-card">
-                  <strong>{panelLabels[account.role]}</strong>
-                  <p>{account.username}</p>
-                  <p>{account.password}</p>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     );

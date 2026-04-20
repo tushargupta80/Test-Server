@@ -1,13 +1,12 @@
 const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs').promises;
-const path = require('path');
+const { MongoClient } = require('mongodb');
 
 const app = express();
-const PORT = process.env.PORT || 4000;
-const quizzesPath = path.join(__dirname, 'quizzes.json');
-const usersPath = path.join(__dirname, 'users.json');
+const PORT = process.env.PORT || 4002;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
+const MONGODB_DB = process.env.MONGODB_DB || 'quiz_platform';
 const roles = ['student', 'teacher', 'admin'];
 
 const defaultUsers = [
@@ -40,7 +39,46 @@ const defaultUsers = [
   },
 ];
 
+const defaultQuizzes = [
+  {
+    id: 'quiz-js-01',
+    title: 'JavaScript Basics',
+    description: 'A short quiz covering variables, arrays, and loops.',
+    questions: [
+      {
+        text: 'Which keyword declares a variable that cannot be reassigned?',
+        options: ['let', 'const', 'var', 'function'],
+        correct: 1,
+      },
+      {
+        text: 'What is the result of [1,2,3].length?',
+        options: ['2', '3', 'undefined', '0'],
+        correct: 1,
+      },
+    ],
+  },
+  {
+    id: 'quiz-html-01',
+    title: 'HTML Fundamentals',
+    description: 'Test your knowledge of HTML tags and structure.',
+    questions: [
+      {
+        text: 'Which tag defines a paragraph?',
+        options: ['<div>', '<p>', '<section>', '<span>'],
+        correct: 1,
+      },
+      {
+        text: 'What attribute is used to link a stylesheet?',
+        options: ['src', 'href', 'rel', 'type'],
+        correct: 2,
+      },
+    ],
+  },
+];
+
 const sessions = new Map();
+const mongoClient = new MongoClient(MONGODB_URI);
+let db;
 
 app.use(
   cors({
@@ -49,6 +87,14 @@ app.use(
   })
 );
 app.use(express.json());
+
+function usersCollection() {
+  return db.collection('users');
+}
+
+function quizzesCollection() {
+  return db.collection('quizzes');
+}
 
 function sanitizeUser(user) {
   return {
@@ -80,43 +126,20 @@ function readToken(req) {
   return authorization.slice('Bearer '.length).trim();
 }
 
-async function readJsonFile(filePath, fallbackValue) {
-  try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    return fallbackValue;
-  }
-}
-
-async function writeJsonFile(filePath, data) {
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-async function ensureUsersFile() {
-  try {
-    await fs.access(usersPath);
-  } catch (error) {
-    await writeJsonFile(usersPath, defaultUsers);
-  }
-}
-
 async function readUsers() {
-  const users = await readJsonFile(usersPath, defaultUsers);
-  return Array.isArray(users) ? users : defaultUsers;
+  return usersCollection().find({}, { projection: { _id: 0 } }).sort({ name: 1 }).toArray();
 }
 
-async function writeUsers(users) {
-  await writeJsonFile(usersPath, users);
+async function findUserById(id) {
+  return usersCollection().findOne({ id }, { projection: { _id: 0 } });
+}
+
+async function findUserByUsername(username) {
+  return usersCollection().findOne({ username }, { projection: { _id: 0 } });
 }
 
 async function readQuizzes() {
-  const quizzes = await readJsonFile(quizzesPath, []);
-  return Array.isArray(quizzes) ? quizzes : [];
-}
-
-async function writeQuizzes(quizzes) {
-  await writeJsonFile(quizzesPath, quizzes);
+  return quizzesCollection().find({}, { projection: { _id: 0 } }).sort({ title: 1 }).toArray();
 }
 
 function invalidateUserSessions(userId) {
@@ -127,68 +150,93 @@ function invalidateUserSessions(userId) {
   }
 }
 
+async function ensureDatabaseState() {
+  await usersCollection().createIndex({ id: 1 }, { unique: true });
+  await usersCollection().createIndex({ username: 1 }, { unique: true });
+  await quizzesCollection().createIndex({ id: 1 }, { unique: true });
+
+  const [userCount, quizCount] = await Promise.all([
+    usersCollection().countDocuments(),
+    quizzesCollection().countDocuments(),
+  ]);
+
+  if (userCount === 0) {
+    await usersCollection().insertMany(defaultUsers);
+  }
+
+  if (quizCount === 0) {
+    await quizzesCollection().insertMany(defaultQuizzes);
+  }
+}
+
 function requireAuth(allowedRoles = roles) {
   return async (req, res, next) => {
-    const token = readToken(req);
-    if (!token) {
-      return res.status(401).json({ message: 'Authentication required.' });
+    try {
+      const token = readToken(req);
+      if (!token) {
+        return res.status(401).json({ message: 'Authentication required.' });
+      }
+
+      const session = sessions.get(token);
+      if (!session) {
+        return res.status(401).json({ message: 'Session expired or invalid.' });
+      }
+
+      const currentUser = await findUserById(session.user.id);
+
+      if (!currentUser) {
+        sessions.delete(token);
+        return res.status(401).json({ message: 'Your account is no longer available.' });
+      }
+
+      if (!allowedRoles.includes(currentUser.role)) {
+        return res.status(403).json({ message: 'You do not have access to this action.' });
+      }
+
+      const safeUser = sanitizeUser(currentUser);
+      sessions.set(token, {
+        ...session,
+        user: safeUser,
+      });
+
+      req.token = token;
+      req.user = safeUser;
+      next();
+    } catch (error) {
+      next(error);
     }
-
-    const session = sessions.get(token);
-    if (!session) {
-      return res.status(401).json({ message: 'Session expired or invalid.' });
-    }
-
-    const users = await readUsers();
-    const currentUser = users.find((entry) => entry.id === session.user.id);
-
-    if (!currentUser) {
-      sessions.delete(token);
-      return res.status(401).json({ message: 'Your account is no longer available.' });
-    }
-
-    if (!allowedRoles.includes(currentUser.role)) {
-      return res.status(403).json({ message: 'You do not have access to this action.' });
-    }
-
-    const safeUser = sanitizeUser(currentUser);
-    sessions.set(token, {
-      ...session,
-      user: safeUser,
-    });
-
-    req.token = token;
-    req.user = safeUser;
-    next();
   };
 }
 
-app.post('/api/auth/login', async (req, res) => {
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '');
+app.post('/api/auth/login', async (req, res, next) => {
+  try {
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
 
-  if (!username || !password) {
-    return res.status(400).json({ message: 'Username and password are required.' });
+    if (!username || !password) {
+      return res.status(400).json({ message: 'Username and password are required.' });
+    }
+
+    const user = await findUserByUsername(username);
+
+    if (!user || !verifyPassword(password, user)) {
+      return res.status(401).json({ message: 'Invalid username or password.' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const safeUser = sanitizeUser(user);
+    sessions.set(token, {
+      user: safeUser,
+      createdAt: Date.now(),
+    });
+
+    res.json({
+      token,
+      user: safeUser,
+    });
+  } catch (error) {
+    next(error);
   }
-
-  const users = await readUsers();
-  const user = users.find((entry) => entry.username === username);
-
-  if (!user || !verifyPassword(password, user)) {
-    return res.status(401).json({ message: 'Invalid username or password.' });
-  }
-
-  const token = crypto.randomBytes(32).toString('hex');
-  const safeUser = sanitizeUser(user);
-  sessions.set(token, {
-    user: safeUser,
-    createdAt: Date.now(),
-  });
-
-  res.json({
-    token,
-    user: safeUser,
-  });
 });
 
 app.get('/api/auth/me', requireAuth(), async (req, res) => {
@@ -200,203 +248,208 @@ app.post('/api/auth/logout', requireAuth(), async (req, res) => {
   res.json({ message: 'Logged out successfully.' });
 });
 
-app.get('/api/users', requireAuth(['admin']), async (req, res) => {
-  const users = await readUsers();
-  res.json(users.map(sanitizeUser));
+app.get('/api/users', requireAuth(['admin']), async (req, res, next) => {
+  try {
+    const users = await readUsers();
+    res.json(users.map(sanitizeUser));
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.post('/api/users', requireAuth(['admin']), async (req, res) => {
-  const name = String(req.body.name || '').trim();
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '');
-  const role = String(req.body.role || '').trim().toLowerCase();
+app.post('/api/users', requireAuth(['admin']), async (req, res, next) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    const role = String(req.body.role || '').trim().toLowerCase();
 
-  if (!name || !username || !password || !role) {
-    return res.status(400).json({ message: 'Name, username, password, and role are required.' });
+    if (!name || !username || !password || !role) {
+      return res.status(400).json({ message: 'Name, username, password, and role are required.' });
+    }
+
+    if (!roles.includes(role)) {
+      return res.status(400).json({ message: 'Role must be student, teacher, or admin.' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+    }
+
+    const usernamePattern = /^[a-zA-Z0-9_.-]+$/;
+    if (!usernamePattern.test(username)) {
+      return res
+        .status(400)
+        .json({ message: 'Username can only include letters, numbers, dot, dash, and underscore.' });
+    }
+
+    const existingUser = await findUserByUsername(username);
+    if (existingUser) {
+      return res.status(409).json({ message: 'That username is already in use.' });
+    }
+
+    const { salt, passwordHash } = hashPassword(password);
+    const newUser = {
+      id: `user-${Date.now()}`,
+      username,
+      name,
+      role,
+      salt,
+      passwordHash,
+    };
+
+    await usersCollection().insertOne(newUser);
+    res.status(201).json({ user: sanitizeUser(newUser) });
+  } catch (error) {
+    next(error);
   }
-
-  if (!roles.includes(role)) {
-    return res.status(400).json({ message: 'Role must be student, teacher, or admin.' });
-  }
-
-  if (password.length < 6) {
-    return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
-  }
-
-  const usernamePattern = /^[a-zA-Z0-9_.-]+$/;
-  if (!usernamePattern.test(username)) {
-    return res.status(400).json({ message: 'Username can only include letters, numbers, dot, dash, and underscore.' });
-  }
-
-  const users = await readUsers();
-  const exists = users.some((entry) => entry.username.toLowerCase() === username.toLowerCase());
-  if (exists) {
-    return res.status(409).json({ message: 'That username is already in use.' });
-  }
-
-  const { salt, passwordHash } = hashPassword(password);
-  const newUser = {
-    id: `user-${Date.now()}`,
-    username,
-    name,
-    role,
-    salt,
-    passwordHash,
-  };
-
-  users.push(newUser);
-  await writeUsers(users);
-  res.status(201).json({ user: sanitizeUser(newUser) });
 });
 
-app.delete('/api/users/:id', requireAuth(['admin']), async (req, res) => {
-  const users = await readUsers();
-  const targetUser = users.find((entry) => entry.id === req.params.id);
+app.delete('/api/users/:id', requireAuth(['admin']), async (req, res, next) => {
+  try {
+    const targetUser = await findUserById(req.params.id);
 
-  if (!targetUser) {
-    return res.status(404).json({ message: 'User not found.' });
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (targetUser.id === req.user.id) {
+      return res
+        .status(400)
+        .json({ message: 'You cannot delete your own admin account while signed in.' });
+    }
+
+    const adminCount = await usersCollection().countDocuments({ role: 'admin' });
+    if (targetUser.role === 'admin' && adminCount <= 1) {
+      return res.status(400).json({ message: 'At least one admin account must remain.' });
+    }
+
+    await usersCollection().deleteOne({ id: targetUser.id });
+    invalidateUserSessions(targetUser.id);
+    res.json({ message: 'User deleted successfully.' });
+  } catch (error) {
+    next(error);
   }
-
-  if (targetUser.id === req.user.id) {
-    return res.status(400).json({ message: 'You cannot delete your own admin account while signed in.' });
-  }
-
-  const adminCount = users.filter((entry) => entry.role === 'admin').length;
-  if (targetUser.role === 'admin' && adminCount <= 1) {
-    return res.status(400).json({ message: 'At least one admin account must remain.' });
-  }
-
-  const nextUsers = users.filter((entry) => entry.id !== targetUser.id);
-  await writeUsers(nextUsers);
-  invalidateUserSessions(targetUser.id);
-  res.json({ message: 'User deleted successfully.' });
 });
 
-app.get('/api/quizzes', requireAuth(), async (req, res) => {
-  const quizzes = await readQuizzes();
-  const summary = quizzes.map((quiz) => ({
-    id: quiz.id,
-    title: quiz.title,
-    description: quiz.description,
-    questionCount: quiz.questions.length,
-  }));
-  res.json(summary);
+app.get('/api/quizzes', requireAuth(), async (req, res, next) => {
+  try {
+    const quizzes = await readQuizzes();
+    const summary = quizzes.map((quiz) => ({
+      id: quiz.id,
+      title: quiz.title,
+      description: quiz.description,
+      questionCount: quiz.questions.length,
+    }));
+    res.json(summary);
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/quizzes/:id', requireAuth(), async (req, res) => {
-  const quizzes = await readQuizzes();
-  const quiz = quizzes.find((item) => item.id === req.params.id);
-  if (!quiz) {
-    return res.status(404).json({ message: 'Quiz not found' });
-  }
-  res.json(quiz);
-});
-
-app.post('/api/quizzes', requireAuth(['teacher', 'admin']), async (req, res) => {
-  const quizzes = await readQuizzes();
-  const { title, description, questions } = req.body;
-
-  if (!title || !questions || !Array.isArray(questions) || questions.length === 0) {
-    return res.status(400).json({ message: 'Title and questions are required.' });
-  }
-
-  const validQuestions = questions.every((question) => {
-    return (
-      question &&
-      typeof question.text === 'string' &&
-      question.text.trim() &&
-      Array.isArray(question.options) &&
-      question.options.length === 4 &&
-      question.options.every((option) => typeof option === 'string' && option.trim()) &&
-      Number.isInteger(question.correct) &&
-      question.correct >= 0 &&
-      question.correct < 4
+app.get('/api/quizzes/:id', requireAuth(), async (req, res, next) => {
+  try {
+    const quiz = await quizzesCollection().findOne(
+      { id: req.params.id },
+      { projection: { _id: 0 } }
     );
-  });
 
-  if (!validQuestions) {
-    return res
-      .status(400)
-      .json({ message: 'Each question must include 4 options and one correct answer.' });
+    if (!quiz) {
+      return res.status(404).json({ message: 'Quiz not found' });
+    }
+
+    res.json(quiz);
+  } catch (error) {
+    next(error);
   }
-
-  const id = `quiz-${Date.now()}`;
-  const newQuiz = {
-    id,
-    title: String(title).trim(),
-    description: String(description || '').trim(),
-    questions: questions.map((question) => ({
-      text: question.text.trim(),
-      options: question.options.map((option) => option.trim()),
-      correct: question.correct,
-    })),
-    createdBy: req.user.username,
-  };
-
-  quizzes.push(newQuiz);
-  await writeQuizzes(quizzes);
-  res.status(201).json(newQuiz);
 });
 
-app.delete('/api/quizzes/:id', requireAuth(['admin']), async (req, res) => {
-  const quizzes = await readQuizzes();
-  const filtered = quizzes.filter((item) => item.id !== req.params.id);
-  if (filtered.length === quizzes.length) {
-    return res.status(404).json({ message: 'Quiz not found' });
-  }
-  await writeQuizzes(filtered);
-  res.json({ message: 'Quiz deleted successfully' });
-});
+app.post('/api/quizzes', requireAuth(['teacher', 'admin']), async (req, res, next) => {
+  try {
+    const { title, description, questions } = req.body;
 
-app.post('/api/reset', requireAuth(['admin']), async (req, res) => {
-  const defaultQuizzes = [
-    {
-      id: 'quiz-js-01',
-      title: 'JavaScript Basics',
-      description: 'A short quiz covering variables, arrays, and loops.',
-      questions: [
-        {
-          text: 'Which keyword declares a variable that cannot be reassigned?',
-          options: ['let', 'const', 'var', 'function'],
-          correct: 1,
-        },
-        {
-          text: 'What is the result of [1,2,3].length?',
-          options: ['2', '3', 'undefined', '0'],
-          correct: 1,
-        },
-      ],
-    },
-    {
-      id: 'quiz-html-01',
-      title: 'HTML Fundamentals',
-      description: 'Test your knowledge of HTML tags and structure.',
-      questions: [
-        {
-          text: 'Which tag defines a paragraph?',
-          options: ['<div>', '<p>', '<section>', '<span>'],
-          correct: 1,
-        },
-        {
-          text: 'What attribute is used to link a stylesheet?',
-          options: ['src', 'href', 'rel', 'type'],
-          correct: 2,
-        },
-      ],
-    },
-  ];
+    if (!title || !questions || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ message: 'Title and questions are required.' });
+    }
 
-  await writeQuizzes(defaultQuizzes);
-  res.json({ message: 'Quiz data reset successfully' });
-});
-
-ensureUsersFile()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Quiz backend running on http://localhost:${PORT}`);
+    const validQuestions = questions.every((question) => {
+      return (
+        question &&
+        typeof question.text === 'string' &&
+        question.text.trim() &&
+        Array.isArray(question.options) &&
+        question.options.length === 4 &&
+        question.options.every((option) => typeof option === 'string' && option.trim()) &&
+        Number.isInteger(question.correct) &&
+        question.correct >= 0 &&
+        question.correct < 4
+      );
     });
-  })
-  .catch((error) => {
-    console.error('Failed to initialize user store:', error);
-    process.exit(1);
+
+    if (!validQuestions) {
+      return res
+        .status(400)
+        .json({ message: 'Each question must include 4 options and one correct answer.' });
+    }
+
+    const newQuiz = {
+      id: `quiz-${Date.now()}`,
+      title: String(title).trim(),
+      description: String(description || '').trim(),
+      questions: questions.map((question) => ({
+        text: question.text.trim(),
+        options: question.options.map((option) => option.trim()),
+        correct: question.correct,
+      })),
+      createdBy: req.user.username,
+    };
+
+    await quizzesCollection().insertOne(newQuiz);
+    res.status(201).json(newQuiz);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/quizzes/:id', requireAuth(['admin']), async (req, res, next) => {
+  try {
+    const result = await quizzesCollection().deleteOne({ id: req.params.id });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'Quiz not found' });
+    }
+    res.json({ message: 'Quiz deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/reset', requireAuth(['admin']), async (req, res, next) => {
+  try {
+    await quizzesCollection().deleteMany({});
+    await quizzesCollection().insertMany(defaultQuizzes);
+    res.json({ message: 'Quiz data reset successfully' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use((error, req, res, next) => {
+  console.error(error);
+  res.status(500).json({ message: 'Internal server error.' });
+});
+
+async function startServer() {
+  await mongoClient.connect();
+  db = mongoClient.db(MONGODB_DB);
+  await ensureDatabaseState();
+
+  app.listen(PORT, () => {
+    console.log(`Quiz backend running on http://localhost:${PORT}`);
+    console.log(`MongoDB connected to ${MONGODB_URI} (db: ${MONGODB_DB})`);
   });
+}
+
+startServer().catch((error) => {
+  console.error('Failed to connect to MongoDB:', error);
+  process.exit(1);
+});
